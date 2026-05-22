@@ -46,10 +46,55 @@ if [[ "${1:-}" == "--force-recompute" ]]; then
   FORCE_RECOMPUTE="--force-recompute"
 fi
 
+slugify_dataset() {
+  local dataset_name="$1"
+  dataset_name="${dataset_name%.csv}"
+  dataset_name="${dataset_name,,}"
+  dataset_name="${dataset_name// /_}"
+  dataset_name="${dataset_name//-/_}"
+  echo "${dataset_name}"
+}
+
+should_skip_experiment() {
+  local dataset_path="$1"
+  local representation="$2"
+  local dataset_name
+  local dataset_slug
+  local summary_path
+  local status
+
+  if [[ -n "${FORCE_RECOMPUTE}" ]]; then
+    return 1
+  fi
+
+  dataset_name="$(basename "${dataset_path}")"
+  dataset_slug="$(slugify_dataset "${dataset_name}")"
+  summary_path="${OUTPUT_DIR}/runs/${representation}/${dataset_slug}/summary.json"
+
+  if [[ ! -f "${summary_path}" ]]; then
+    return 1
+  fi
+
+  status="$("${PYTHON_BIN}" - <<PY
+import json
+from pathlib import Path
+path = Path(${summary_path@Q})
+data = json.loads(path.read_text(encoding="utf-8"))
+print(data.get("status", ""))
+PY
+)"
+
+  [[ "${status}" == "ok" ]]
+}
+
 for dataset_path in "${DATASETS[@]}"; do
   for representation in "${REPRESENTATIONS[@]}"; do
     echo
     echo "dataset=$(basename "${dataset_path}") representation=${representation}"
+    if should_skip_experiment "${dataset_path}" "${representation}"; then
+      echo "skipped: summary.json already exists with status=ok"
+      continue
+    fi
     PYTHONPATH="${ROOT_DIR}/src" "${PYTHON_BIN}" -m embeddings_pipeline \
       --dataset "${dataset_path}" \
       --representation "${representation}" \
