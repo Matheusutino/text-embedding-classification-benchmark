@@ -1,6 +1,7 @@
 import csv
 from pathlib import Path
 
+import numpy as np
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
 from embeddings_pipeline.experiment import run_experiment
@@ -85,3 +86,47 @@ def test_functional_run_with_lexical_representation(tmp_path: Path) -> None:
         / "test_final"
         / "metadata.json"
     ).exists()
+
+
+def test_functional_run_with_linear_svc(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "dataset.csv"
+    rows = []
+    for i in range(15):
+        rows.append({"text": f"ham message {i}", "class": "ham"})
+    for i in range(15):
+        rows.append({"text": f"spam offer {i}", "class": "spam"})
+    with dataset_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["text", "class"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    result = run_experiment(
+        dataset_path=dataset_path,
+        representation_name="tfidf_unigram",
+        output_dir=tmp_path / "artifacts",
+        classifier_name="linear_svc",
+        linear_svc_multi_class="ovr",
+    )
+    assert result.status == "ok"
+    assert result.summary_path.exists()
+
+
+def test_train_val_retrain_order_matches_labels() -> None:
+    labels = np.asarray(["a"] * 20 + ["b"] * 20, dtype=object)
+    splitter = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    outer_train_idx, _ = next(iter(splitter.split(np.arange(len(labels)), labels)))
+    inner_train_rel, val_rel = train_test_split(
+        np.arange(len(outer_train_idx)),
+        test_size=0.2,
+        random_state=42,
+        stratify=labels[outer_train_idx],
+    )
+    train_idx = outer_train_idx[inner_train_rel]
+    val_idx = outer_train_idx[val_rel]
+
+    train_val_idx = np.concatenate([train_idx, val_idx])
+    y_train = labels[train_idx]
+    y_val = labels[val_idx]
+    y_train_val = labels[train_val_idx]
+
+    assert np.array_equal(y_train_val, np.concatenate([y_train, y_val]))

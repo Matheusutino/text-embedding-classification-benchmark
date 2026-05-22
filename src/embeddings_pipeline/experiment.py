@@ -11,6 +11,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.svm import LinearSVC
 
 from embeddings_pipeline import PIPELINE_VERSION
 from embeddings_pipeline.config import (
@@ -55,6 +56,7 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
 def fit_logistic_regression(X_train: Any, y_train: np.ndarray, c_value: float) -> LogisticRegression:
     classifier = LogisticRegression(
         C=c_value,
+        class_weight="balanced",
         max_iter=1000,
         random_state=42,
         solver="lbfgs",
@@ -63,18 +65,57 @@ def fit_logistic_regression(X_train: Any, y_train: np.ndarray, c_value: float) -
     return classifier
 
 
+def fit_linear_svc(
+    X_train: Any,
+    y_train: np.ndarray,
+    c_value: float,
+    multi_class: str,
+) -> LinearSVC:
+    classifier = LinearSVC(
+        C=c_value,
+        class_weight="balanced",
+        multi_class=multi_class,
+        max_iter=5000,
+        random_state=42,
+    )
+    classifier.fit(X_train, y_train)
+    return classifier
+
+
+def fit_classifier(
+    X_train: Any,
+    y_train: np.ndarray,
+    c_value: float,
+    classifier_name: str,
+    linear_svc_multi_class: str,
+) -> Any:
+    if classifier_name == "logistic_regression":
+        return fit_logistic_regression(X_train, y_train, c_value)
+    if classifier_name == "linear_svc":
+        return fit_linear_svc(X_train, y_train, c_value, linear_svc_multi_class)
+    raise ValueError(f"Unsupported classifier: {classifier_name}")
+
+
 def select_best_model(
     X_train: Any,
     y_train: np.ndarray,
     X_val: Any,
     y_val: np.ndarray,
+    classifier_name: str,
+    linear_svc_multi_class: str,
 ) -> tuple[float, dict[str, float], float]:
     best_c = LOGISTIC_C_VALUES[0]
     best_metrics: dict[str, float] | None = None
     best_score = float("-inf")
 
     for c_value in LOGISTIC_C_VALUES:
-        clf = fit_logistic_regression(X_train, y_train, c_value)
+        clf = fit_classifier(
+            X_train,
+            y_train,
+            c_value,
+            classifier_name,
+            linear_svc_multi_class,
+        )
         val_pred = clf.predict(X_val)
         metrics = compute_metrics(y_val, val_pred)
         score = metrics[METRIC_FOR_SELECTION]
@@ -180,6 +221,8 @@ def run_experiment(
     representation_name: str,
     output_dir: str | Path,
     force_recompute: bool = False,
+    classifier_name: str = "logistic_regression",
+    linear_svc_multi_class: str = "ovr",
 ) -> RunArtifacts:
     set_global_seed()
     output_root = Path(output_dir)
@@ -190,6 +233,8 @@ def run_experiment(
 
     dataset_slug = slugify(dataset.name)
     run_dir = output_root / "runs" / representation_name / dataset_slug
+    if classifier_name != "logistic_regression":
+        run_dir = output_root / "runs" / classifier_name / representation_name / dataset_slug
     run_dir.mkdir(parents=True, exist_ok=True)
     folds_path = run_dir / "fold_metrics.csv"
     summary_path = run_dir / "summary.json"
@@ -234,6 +279,9 @@ def run_experiment(
                     "dataset": dataset.name,
                     "representation": representation_name,
                     "model": spec.model_name,
+                    "classifier": classifier_name,
+                    "class_weight": "balanced",
+                    "linear_svc_multi_class": linear_svc_multi_class,
                     "pipeline_version": PIPELINE_VERSION,
                 },
             )
@@ -254,22 +302,31 @@ def run_experiment(
             y_train,
             features.val,
             y_val,
+            classifier_name,
+            linear_svc_multi_class,
         )
         tuning_time = time.perf_counter() - tuning_start
 
         retrain_start = time.perf_counter()
-        y_train_val = np.concatenate([y_train, y_val])
+        train_val_idx = np.concatenate([train_idx, val_idx])
+        y_train_val = dataset.labels[train_val_idx]
         final_features = prepare_final_features(
             spec=spec,
             dataset_name=dataset.name,
             output_dir=output_root,
             texts=dataset.texts,
-            train_val_idx=outer_train_idx,
+            train_val_idx=train_val_idx,
             test_idx=test_idx,
             fold=fold_idx,
             force_recompute=force_recompute,
         )
-        final_model = fit_logistic_regression(final_features.train, y_train_val, best_c)
+        final_model = fit_classifier(
+            final_features.train,
+            y_train_val,
+            best_c,
+            classifier_name,
+            linear_svc_multi_class,
+        )
         retrain_time = time.perf_counter() - retrain_start
 
         eval_start = time.perf_counter()
@@ -318,6 +375,9 @@ def run_experiment(
         "dataset": dataset.name,
         "representation": representation_name,
         "model": spec.model_name,
+        "classifier": classifier_name,
+        "class_weight": "balanced",
+        "linear_svc_multi_class": linear_svc_multi_class,
         "device_detected": detect_device(),
         "pipeline_version": PIPELINE_VERSION,
         "outer_folds": OUTER_FOLDS,

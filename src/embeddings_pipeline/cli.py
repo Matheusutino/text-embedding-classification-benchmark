@@ -27,6 +27,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ignore cache and recompute artifacts.",
     )
+    parser.add_argument(
+        "--classifier",
+        choices=["logistic_regression", "linear_svc"],
+        default="logistic_regression",
+        help="Classifier to train on top of the selected representation.",
+    )
+    parser.add_argument(
+        "--linear-svc-multi-class",
+        choices=["ovr", "crammer_singer"],
+        default="ovr",
+        help="LinearSVC multiclass strategy. Only used when --classifier linear_svc.",
+    )
     return parser
 
 
@@ -39,6 +51,8 @@ def main() -> None:
         representation_name=args.representation,
         output_dir=args.output_dir,
         force_recompute=args.force_recompute,
+        classifier_name=args.classifier,
+        linear_svc_multi_class=args.linear_svc_multi_class,
     )
     print(f"status={result.status}")
     print(f"run_dir={result.run_dir}")

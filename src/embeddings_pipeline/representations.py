@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -264,13 +267,57 @@ def _load_sentence_transformer(model_name: str, device: str):
     return SentenceTransformer(model_name, device=device)
 
 
-def _get_openrouter_client():
-    from openai import OpenAI
-
+def _get_openrouter_api_key() -> str:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
-    return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+    return api_key
+
+
+def _chunk_texts(texts: list[str], chunk_size: int) -> list[list[str]]:
+    return [texts[i : i + chunk_size] for i in range(0, len(texts), chunk_size)]
+
+
+def _fetch_openrouter_embedding_batch(model_name: str, texts: list[str]) -> np.ndarray:
+    api_key = _get_openrouter_api_key()
+    payload = json.dumps({"model": model_name, "input": texts}).encode("utf-8")
+    request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/embeddings",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"OpenRouter HTTP {exc.code} for model {model_name}: {details}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenRouter connection error for model {model_name}: {exc}") from exc
+
+    data = body.get("data")
+    if not data:
+        raise RuntimeError(f"No embedding data received: {body}")
+
+    embeddings = [item.get("embedding") for item in data]
+    if any(embedding is None for embedding in embeddings):
+        raise RuntimeError(f"Malformed embedding payload received: {body}")
+    return np.asarray(embeddings, dtype=np.float32)
+
+
+def _fetch_openrouter_embeddings(model_name: str, texts: list[str], batch_size: int = 100) -> np.ndarray:
+    if not texts:
+        return np.asarray([], dtype=np.float32)
+
+    batches = _chunk_texts(texts, batch_size)
+    outputs = [_fetch_openrouter_embedding_batch(model_name, batch) for batch in batches]
+    return np.vstack(outputs).astype(np.float32)
 
 
 def generate_dense_embeddings(
@@ -314,9 +361,7 @@ def generate_dense_embeddings(
             show_progress_bar=False,
         )
     elif spec.family == "remote":
-        client = _get_openrouter_client()
-        response = client.embeddings.create(model=spec.model_name, input=prefixed_texts)
-        embeddings = np.asarray([row.embedding for row in response.data], dtype=np.float32)
+        embeddings = _fetch_openrouter_embeddings(spec.model_name, prefixed_texts)
     else:
         raise ValueError(f"Unsupported dense family: {spec.family}")
 

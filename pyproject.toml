@@ -12,6 +12,7 @@ dependencies = [
   "scipy>=1.11",
   "scikit-learn>=1.5",
   "python-dotenv>=1.0",
+  "matplotlib>=3.8",
   "sentence-transformers>=3.0",
   "torch>=2.2",
   "openai>=1.30",
