@@ -41,7 +41,7 @@ REPRESENTATIONS=(
   "granite_embedding_125m_english"
   "qwen3_embedding_0_6b"
   "qwen3_embedding_8b"
-  "gemini_embedding_2_preview"
+  "gemini_embedding_001"
   "text_embedding_3_large"
 )
 

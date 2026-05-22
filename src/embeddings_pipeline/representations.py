@@ -258,6 +258,9 @@ def generate_lexical_final_features(
 def _load_sentence_transformer(model_name: str, device: str):
     from sentence_transformers import SentenceTransformer
 
+    token = os.getenv("HUGGINGFACE_HUB_TOKEN")
+    if token:
+        return SentenceTransformer(model_name, device=device, token=token)
     return SentenceTransformer(model_name, device=device)
 
 

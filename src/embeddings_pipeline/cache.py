@@ -44,7 +44,7 @@ def build_metadata(
         "parameters": parameters,
         "normalize_embeddings": normalize_embeddings,
         "pipeline_version": pipeline_version,
-        "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "dtype": dtype,
         "shape": shape,
         "device_used": device_used,

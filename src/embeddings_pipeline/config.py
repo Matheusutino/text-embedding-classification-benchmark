@@ -145,10 +145,10 @@ DENSE_SPECS = {
         model_name="Qwen/Qwen3-Embedding-8B",
         normalize_embeddings=True,
     ),
-    "gemini_embedding_2_preview": RepresentationSpec(
-        name="gemini_embedding_2_preview",
+    "gemini_embedding_001": RepresentationSpec(
+        name="gemini_embedding_001",
         family="remote",
-        model_name="google/gemini-embedding-2-preview",
+        model_name="google/gemini-embedding-001",
         normalize_embeddings=False,
     ),
     "text_embedding_3_large": RepresentationSpec(

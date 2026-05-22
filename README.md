@@ -61,7 +61,7 @@ All lexical variants use `max_features=1000`.
 
 ### Remote models via OpenRouter
 
-- `gemini_embedding_2_preview`
+- `gemini_embedding_001`
 - `text_embedding_3_large`
 
 ## Prefix Handling
@@ -109,6 +109,14 @@ For OpenRouter-backed models, set:
 ```env
 OPENROUTER_API_KEY=your_key_here
 ```
+
+For gated or authenticated Hugging Face models, also set:
+
+```env
+HUGGINGFACE_HUB_TOKEN=your_huggingface_token_here
+```
+
+Some models such as `google/embeddinggemma-300m` require Hugging Face authentication and approved access to the gated repository.
 
 Files included:
 
