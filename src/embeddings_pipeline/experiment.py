@@ -57,7 +57,7 @@ def fit_logistic_regression(X_train: Any, y_train: np.ndarray, c_value: float) -
         C=c_value,
         max_iter=1000,
         random_state=42,
-        solver="liblinear",
+        solver="lbfgs",
     )
     classifier.fit(X_train, y_train)
     return classifier

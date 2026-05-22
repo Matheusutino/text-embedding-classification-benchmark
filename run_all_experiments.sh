@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# nohup bash run_all_experiments.sh > run_all_experiments.log 2>&1 &
+
+
 set -u
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
