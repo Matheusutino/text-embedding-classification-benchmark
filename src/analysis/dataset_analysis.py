@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def read_run_summaries(runs_dir: Path) -> list[dict]:
     summaries = []
-    for summary_path in sorted(runs_dir.glob("*/*/summary.json")):
+    for summary_path in sorted(runs_dir.rglob("summary.json")):
         summaries.append(json.loads(summary_path.read_text(encoding="utf-8")))
     return summaries
 
@@ -97,6 +97,54 @@ def print_summary(labels: list[str], f1_by_representation: list[list[float]]) ->
         )
 
 
+def collect_model_counts_by_dataset(summaries: list[dict]) -> tuple[list[str], list[int]]:
+    grouped: dict[str, set[tuple[str, str]]] = {}
+    for summary in summaries:
+        if summary.get("status") != "ok":
+            continue
+        dataset_name = summary.get("dataset")
+        representation = summary.get("representation")
+        classifier = summary.get("classifier", "logistic_regression")
+        if not dataset_name or not representation:
+            continue
+        grouped.setdefault(dataset_name, set()).add((classifier, representation))
+
+    labels = sorted(grouped.keys())
+    counts = [len(grouped[label]) for label in labels]
+    return labels, counts
+
+
+def plot_model_counts_by_dataset(labels: list[str], counts: list[int], output_path: Path) -> None:
+    fig, ax = plt.subplots(figsize=(max(10, len(labels) * 0.9), 6))
+    bars = ax.bar(range(len(labels)), counts, alpha=0.8)
+    ax.set_title("Successful Models Executed by Dataset")
+    ax.set_ylabel("Number of successful models")
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    for idx, bar in enumerate(bars):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height(),
+            str(counts[idx]),
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, format="pdf", bbox_inches="tight")
+    plt.close(fig)
+
+
+def print_model_count_summary(labels: list[str], counts: list[int]) -> None:
+    print("Successful model count by dataset:")
+    for label, count in zip(labels, counts):
+        print(f"{label}: {count}")
+
+
 def main() -> None:
     args = build_parser().parse_args()
     runs_dir = Path(args.runs_dir)
@@ -105,6 +153,13 @@ def main() -> None:
     summaries = read_run_summaries(runs_dir)
     if not summaries:
         raise FileNotFoundError(f"No summary.json files found in {runs_dir}")
+
+    dataset_labels, dataset_counts = collect_model_counts_by_dataset(summaries)
+    if dataset_labels:
+        count_output_path = output_dir / "successful_model_count_by_dataset.pdf"
+        plot_model_counts_by_dataset(dataset_labels, dataset_counts, count_output_path)
+        print_model_count_summary(dataset_labels, dataset_counts)
+        print(f"saved={count_output_path}")
 
     labels, f1_by_representation = collect_f1_by_representation(summaries, args.dataset)
     if not labels:

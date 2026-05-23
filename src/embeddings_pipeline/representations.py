@@ -14,7 +14,7 @@ import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 
 from embeddings_pipeline.cache import build_metadata, load_if_valid, save_cache
-from embeddings_pipeline.config import RepresentationSpec
+from embeddings_pipeline.config import RepresentationSpec, SENTENCE_TRANSFORMER_BATCH_SIZE
 from embeddings_pipeline.utils import detect_device, slugify
 
 
@@ -267,6 +267,47 @@ def _load_sentence_transformer(model_name: str, device: str):
     return SentenceTransformer(model_name, device=device)
 
 
+def _is_cuda_oom(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "out of memory" in message and "cuda" in message
+
+
+def _encode_with_sentence_transformer(
+    model_name: str,
+    texts: list[str],
+    device: str,
+    normalize_embeddings: bool,
+) -> tuple[np.ndarray, str]:
+    model = _load_sentence_transformer(model_name, device=device)
+    try:
+        embeddings = model.encode(
+            texts,
+            batch_size=SENTENCE_TRANSFORMER_BATCH_SIZE,
+            normalize_embeddings=normalize_embeddings,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        return np.asarray(embeddings, dtype=np.float32), device
+    except RuntimeError as exc:
+        if device != "cuda" or not _is_cuda_oom(exc):
+            raise
+        try:
+            import torch
+
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        fallback_model = _load_sentence_transformer(model_name, device="cpu")
+        embeddings = fallback_model.encode(
+            texts,
+            batch_size=SENTENCE_TRANSFORMER_BATCH_SIZE,
+            normalize_embeddings=normalize_embeddings,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        return np.asarray(embeddings, dtype=np.float32), "cpu"
+
+
 def _get_openrouter_api_key() -> str:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
@@ -328,17 +369,20 @@ def generate_dense_embeddings(
     texts: list[str],
     force_recompute: bool,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    device = detect_device()
+    requested_device = detect_device()
     cache_dir = dense_cache_dir(output_dir, spec, dataset_name)
     text_prefix = get_text_prefix(spec.model_name)
-    parameters = {"normalize_embeddings": spec.normalize_embeddings}
+    parameters = {
+        "normalize_embeddings": spec.normalize_embeddings,
+        "batch_size": SENTENCE_TRANSFORMER_BATCH_SIZE if spec.family == "dense" else None,
+    }
     expected_metadata = build_metadata(
         dataset=dataset_name,
         representation=spec.name,
         model=spec.model_name,
         parameters=parameters,
         normalize_embeddings=spec.normalize_embeddings,
-        device_used=device,
+        device_used=requested_device,
         generation_time_seconds=0.0,
         dtype="float32",
         shape=[],
@@ -352,13 +396,13 @@ def generate_dense_embeddings(
 
     prefixed_texts = apply_text_prefix(texts, spec.model_name)
     start = time.perf_counter()
+    device_used = requested_device
     if spec.family == "dense":
-        model = _load_sentence_transformer(spec.model_name, device=device)
-        embeddings = model.encode(
+        embeddings, device_used = _encode_with_sentence_transformer(
+            spec.model_name,
             prefixed_texts,
-            normalize_embeddings=spec.normalize_embeddings,
-            convert_to_numpy=True,
-            show_progress_bar=False,
+            requested_device,
+            spec.normalize_embeddings,
         )
     elif spec.family == "remote":
         embeddings = _fetch_openrouter_embeddings(spec.model_name, prefixed_texts)
@@ -373,7 +417,7 @@ def generate_dense_embeddings(
         model=spec.model_name,
         parameters=parameters,
         normalize_embeddings=spec.normalize_embeddings,
-        device_used=device,
+        device_used=device_used,
         generation_time_seconds=elapsed,
         dtype="float32",
         shape=list(embeddings.shape),
